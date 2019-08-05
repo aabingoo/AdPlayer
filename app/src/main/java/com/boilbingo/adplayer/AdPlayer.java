@@ -6,10 +6,13 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.os.Handler;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.View;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -18,6 +21,8 @@ import java.util.List;
 public class AdPlayer extends View implements View.OnClickListener {
 
     private final int DEFAULT_SWITCH_TIME = 3 * 1000;
+
+    private final int DEFAULT_TITLE_BG_HEIGHT = 100;
 
     // Store the current index of shown picture
     private int mIndex;
@@ -32,6 +37,8 @@ public class AdPlayer extends View implements View.OnClickListener {
 
     private int mIndexIconMargin = 50;
 
+    private int mIndexIconPos;
+
     private class Point {
         int x;
         int y;
@@ -43,6 +50,21 @@ public class AdPlayer extends View implements View.OnClickListener {
     }
 
     private Paint mIndexIconPaint;
+
+    private Paint mTitlePaint;
+
+    private Paint mTitleBgPaint;
+
+    private List<String> mTitles;
+
+    private int mTitleTextColor = Color.WHITE;
+
+    private int mTitleTextSize = 40;
+
+    private int mTitleBgColor = 0x80000000;
+
+    private int mTitleBgHeight = DEFAULT_TITLE_BG_HEIGHT;
+
 
 
     // The time switch to next picture (ms).
@@ -82,11 +104,26 @@ public class AdPlayer extends View implements View.OnClickListener {
         super(context, attrs);
 
         mIndexIconPaint = new Paint();
+
+        mTitlePaint = new Paint();
+        mTitlePaint.setColor(mTitleTextColor);
+        mTitlePaint.setTextSize(mTitleTextSize);
+
+        mTitleBgPaint = new Paint();
+        mTitleBgPaint.setColor(mTitleBgColor);
+
         setOnClickListener(this);
     }
 
     public void setAdPictures(List<Bitmap> adPictures) {
         mAdPictures = adPictures;
+    }
+
+    public void addAdWithTitle(String title, Bitmap adPicture) {
+        if (mTitles == null) mTitles = new ArrayList<>();
+        if (mAdPictures == null) mAdPictures = new ArrayList<>();
+        mTitles.add(title);
+        mAdPictures.add(adPicture);
     }
 
     public void setItemClickListener(ItemClickListener listener) {
@@ -162,6 +199,13 @@ public class AdPlayer extends View implements View.OnClickListener {
         int viewHeight = getMeasuredHeight();
         int halfCenterLen = mIndexIconSpace * (mAdPictures.size() - 1) / 2;
 
+        // Locate to right if have title
+        if (mTitles != null && mTitles.size() > 0) {
+            return new Point(viewWidth - halfCenterLen - mIndexIconMargin * 2,
+                    viewHeight - mIndexIconMargin);
+        }
+
+        // Locate to center
         return new Point(viewWidth / 2 - halfCenterLen, viewHeight - mIndexIconMargin);
     }
 
@@ -197,6 +241,34 @@ public class AdPlayer extends View implements View.OnClickListener {
             // Draw picture
             canvas.drawBitmap(getCurrentScaledPicture(), 0, 0, null);
 
+            // Draw title
+            if (mTitles != null) {
+                // Draw tile background
+                canvas.drawRect(0,
+                        getMeasuredHeight() - mTitleBgHeight,
+                        getMeasuredWidth(),
+                        getMeasuredHeight(), mTitleBgPaint);
+
+                String title = mTitles.get(mIndex);
+                if(!TextUtils.isEmpty(title)) {
+                    // Get text bounds
+                    Rect textBounds = new Rect();
+                    mTitlePaint.getTextBounds(title, 0, title.length(), textBounds);
+
+                    // Get the drawable rect to write title
+                    Rect drawableRect = getDrawableTextRect(textBounds);
+
+                    String writableText = getWritableText(title, textBounds, drawableRect);
+                    if (!TextUtils.isEmpty(writableText)) {
+                        title = writableText;
+                        mTitles.set(mIndex, title);
+                    }
+
+                    canvas.drawText(title,
+                            drawableRect.left, drawableRect.bottom, mTitlePaint);
+                }
+            }
+
             // Draw index icon
             Point firstIndexPos = calculateFirstIndexIconPos();
             for (int i = 0; i < mAdPictures.size(); i++) {
@@ -209,5 +281,44 @@ public class AdPlayer extends View implements View.OnClickListener {
                         firstIndexPos.y, mIndexIconRadius, mIndexIconPaint);
             }
         }
+    }
+
+    /**
+     * Calculate the rect that can used to write title
+     * @param textBounds: the real rect of title
+     * @return Rect object
+     */
+    private Rect getDrawableTextRect(Rect textBounds) {
+        int left = mIndexIconMargin;
+        // The space of rect's bottom to title's bottom.
+        int bottomMargin = (mTitleBgHeight - textBounds.height()) / 2;
+        int top = getMeasuredHeight() - mTitleBgHeight + bottomMargin;
+        int right = left + getMeasuredWidth() - mIndexIconMargin * 4 -
+                mIndexIconSpace * (mAdPictures.size() - 1) + 2 * mIndexIconRadius;
+        int bottom = getMeasuredHeight() - bottomMargin;
+        return new Rect(left, top, right, bottom);
+    }
+
+    /**
+     * Cut title if title's length is larger than drawable rect's width
+     * @param text: title
+     * @param textBounds: the real rect of title
+     * @param drawableRect: the rect that can used to write title
+     * @return A string that can be shown
+     */
+    private String getWritableText(String text, Rect textBounds, Rect drawableRect) {
+        String result = null;
+        boolean needCut = false;
+        // Cut title until can be written
+        // TODO: Optimize if the title length is very long
+        while (textBounds.width() > drawableRect.width()) {
+            needCut = true;
+            text = text.subSequence(0, text.length() - 1 - 3) + "...";
+            mTitlePaint.getTextBounds(text, 0, text.length(), textBounds);
+        }
+
+        if (needCut) result = text;
+
+        return result;
     }
 }

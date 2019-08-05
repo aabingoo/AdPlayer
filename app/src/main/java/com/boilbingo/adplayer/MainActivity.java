@@ -28,7 +28,11 @@ public class MainActivity extends AppCompatActivity {
         list.add(bitmap2);
         list.add(bitmap3);
         list.add(bitmap4);
-        adPlayer.setAdPictures(list);
+//        adPlayer.setAdPictures(list);
+        adPlayer.addAdWithTitle("塞法阿道夫", bitmap1);
+        adPlayer.addAdWithTitle("塞法阿道夫aafasdfa", bitmap2);
+        adPlayer.addAdWithTitle("塞法阿道夫阿斯顿发送到发送到法萨是否是多福多寿发生的阿瑟费大是大非阿斯顿发送地方", bitmap3);
+        adPlayer.addAdWithTitle("塞法阿道夫", bitmap4);
         adPlayer.setItemClickListener(new AdPlayer.ItemClickListener() {
             @Override
             public void onItemClick(int index) {
