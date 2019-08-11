@@ -10,6 +10,7 @@ import android.graphics.Rect;
 import android.os.Handler;
 import android.text.TextUtils;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.View;
 
 import java.util.ArrayList;
@@ -25,7 +26,9 @@ public class AdPlayer extends View implements View.OnClickListener {
     private final int DEFAULT_TITLE_BG_HEIGHT = 100;
 
     // Store the current index of shown picture
-    private int mIndex;
+    private int mCurIndex;
+
+    private int mPreIndex = -1;
 
     // Array to store AD pictures
     private List<Bitmap> mAdPictures;
@@ -77,11 +80,15 @@ public class AdPlayer extends View implements View.OnClickListener {
         public void run() {
             // Refresh view while updating index success
             if (updateIndex(true)) {
+                // Start to switch
+                mSwitching = true;
+                mSwitchedWidth = 0;
+
                 // Refresh view.
                 invalidate();
 
                 // Post next switch task
-                postNextSwitchTask();
+                //postNextSwitchTask();
             }
         }
     };
@@ -133,7 +140,7 @@ public class AdPlayer extends View implements View.OnClickListener {
     @Override
     public void onClick(View v) {
         if (mItemClickListener != null) {
-            mItemClickListener.onItemClick(mIndex);
+            mItemClickListener.onItemClick(mCurIndex);
         }
     }
 
@@ -146,10 +153,13 @@ public class AdPlayer extends View implements View.OnClickListener {
         boolean result = false;
 
         if (mAdPictures != null && mAdPictures.size() > 1) {
+            // Store previous index
+            mPreIndex = mCurIndex;
+            // Update current index
             if (forward) {
-                mIndex = ++mIndex % mAdPictures.size();
+                mCurIndex = ++mCurIndex % mAdPictures.size();
             } else {
-                mIndex = (--mIndex < 0) ? mAdPictures.size() - 1 : mIndex;
+                mCurIndex = (--mCurIndex < 0) ? mAdPictures.size() - 1 : mCurIndex;
             }
             result = true;
         }
@@ -172,7 +182,7 @@ public class AdPlayer extends View implements View.OnClickListener {
     public void start() {
         if (mAdPictures != null && mAdPictures.size() > 0) {
             // Initial index to 0
-            mIndex = 0;
+            mCurIndex = 0;
 
             // Refresh player to show first picture
             invalidate();
@@ -214,7 +224,7 @@ public class AdPlayer extends View implements View.OnClickListener {
      * @return bitmap
      */
     private Bitmap getCurrentScaledPicture() {
-        Bitmap oldBm = mAdPictures.get(mIndex);
+        Bitmap oldBm = mAdPictures.get(mCurIndex);
         int bmWidth = oldBm.getWidth();
         int bmHeight = oldBm.getHeight();
         float scaleWidth = ((float)getMeasuredWidth()) / bmWidth;
@@ -226,11 +236,11 @@ public class AdPlayer extends View implements View.OnClickListener {
             matrix.postScale(scaleWidth, scaleHeight);
             Bitmap newBm = Bitmap.createBitmap(oldBm,
                     0, 0, bmWidth, bmHeight, matrix, true);
-            mAdPictures.set(mIndex, newBm);
+            mAdPictures.set(mCurIndex, newBm);
 
             oldBm.recycle();
         }
-        return mAdPictures.get(mIndex);
+        return mAdPictures.get(mCurIndex);
     }
 
     @Override
@@ -239,7 +249,8 @@ public class AdPlayer extends View implements View.OnClickListener {
 
         if (mAdPictures != null && mAdPictures.size() > 0) {
             // Draw picture
-            canvas.drawBitmap(getCurrentScaledPicture(), 0, 0, null);
+            //
+
 
             // Draw title
             if (mTitles != null) {
@@ -249,7 +260,7 @@ public class AdPlayer extends View implements View.OnClickListener {
                         getMeasuredWidth(),
                         getMeasuredHeight(), mTitleBgPaint);
 
-                String title = mTitles.get(mIndex);
+                String title = mTitles.get(mCurIndex);
                 if(!TextUtils.isEmpty(title)) {
                     // Get text bounds
                     Rect textBounds = new Rect();
@@ -261,7 +272,7 @@ public class AdPlayer extends View implements View.OnClickListener {
                     String writableText = getWritableText(title, textBounds, drawableRect);
                     if (!TextUtils.isEmpty(writableText)) {
                         title = writableText;
-                        mTitles.set(mIndex, title);
+                        mTitles.set(mCurIndex, title);
                     }
 
                     canvas.drawText(title,
@@ -273,13 +284,71 @@ public class AdPlayer extends View implements View.OnClickListener {
             Point firstIndexPos = calculateFirstIndexIconPos();
             for (int i = 0; i < mAdPictures.size(); i++) {
                 mIndexIconPaint.setColor(Color.DKGRAY);
-                if (i == mIndex) {
+                if (i == mCurIndex) {
                     mIndexIconPaint.setColor(Color.RED);
                 }
 
                 canvas.drawCircle(firstIndexPos.x + mIndexIconSpace * i,
                         firstIndexPos.y, mIndexIconRadius, mIndexIconPaint);
             }
+        }
+    }
+
+    private boolean mSwitching = false;
+    private boolean mForward = true;
+    private int mSwitchedWidth = 0;
+    private int mTotalSwitchingTime = 600;
+    private int mDelayTimeWhildSwitching = 20;
+
+    private Runnable swtichingPictureRun = new Runnable() {
+        @Override
+        public void run() {
+            if (mSwitching) {
+                // Clear same kind callbacks at queue.
+                // Because onDraw maybe called several times.
+                mPlayHandler.removeCallbacks(this);
+
+                // Calculate alpha to ensure finish switch in given time
+                int width = getMeasuredWidth();
+                int alpha = width * mDelayTimeWhildSwitching / mTotalSwitchingTime;
+                if (mForward) {
+                    mSwitchedWidth -= alpha;
+                } else {
+                    mSwitchedWidth += alpha;
+                }
+                if (Math.abs(mSwitchedWidth) > width) {
+                    // Finish switching task
+                    mSwitchedWidth = width;
+                    mSwitching = false;
+                    // Post the next switch task
+                    postNextSwitchTask();
+                }
+                mPlayHandler.postDelayed(swtichingPictureRun, mDelayTimeWhildSwitching);
+                // Refresh view
+                invalidate();
+            }
+        }
+    };
+
+    private void drawDisplayBitmap(Canvas canvas) {
+        if (mSwitching) {
+            if (mForward) {
+                // switch to next picture
+                // draw left
+                canvas.drawBitmap(mAdPictures.get(mPreIndex), mSwitchedWidth, 0, null);
+                //draw right
+                canvas.drawBitmap(getCurrentScaledPicture(), getMeasuredWidth() + mSwitchedWidth, 0, null);
+            } else {
+                // switch to previous picture
+                // draw left
+                canvas.drawBitmap(mAdPictures.get(mPreIndex), -getMeasuredWidth() + mSwitchedWidth, 0, null);
+                //draw right
+                canvas.drawBitmap(getCurrentScaledPicture(), mSwitchedWidth, 0, null);
+            }
+
+            mPlayHandler.postDelayed(swtichingPictureRun, mSwitchedWidth == 0 ? 0 : mDelayTimeWhildSwitching);
+        } else {
+            canvas.drawBitmap(getCurrentScaledPicture(), 0, 0, null);
         }
     }
 
