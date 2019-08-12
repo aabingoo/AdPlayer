@@ -68,7 +68,16 @@ public class AdPlayer extends View implements View.OnClickListener {
 
     private int mTitleBgHeight = DEFAULT_TITLE_BG_HEIGHT;
 
+    private boolean mForward = true;
 
+    // the offset switched
+    private int mSwitchedOffset = 0;
+
+    // Total time while smooth switching
+    private int mTotalSwitchingTime = 500;
+
+    // Refresh frequency while smooth switching
+    private int mDelayTimeWhileSwitching = 10;
 
     // The time switch to next picture (ms).
     private int mSwitchTime = DEFAULT_SWITCH_TIME;
@@ -81,14 +90,11 @@ public class AdPlayer extends View implements View.OnClickListener {
             // Refresh view while updating index success
             if (updateIndex(true)) {
                 // Start to switch
-                mSwitching = true;
-                mSwitchedWidth = 0;
+                // Initial
+                mSwitchedOffset = 0;
 
-                // Refresh view.
-                invalidate();
-
-                // Post next switch task
-                //postNextSwitchTask();
+                // startSmoothSwitching
+                startSmoothSwitching();
             }
         }
     };
@@ -249,8 +255,7 @@ public class AdPlayer extends View implements View.OnClickListener {
 
         if (mAdPictures != null && mAdPictures.size() > 0) {
             // Draw picture
-            //
-
+            drawDisplayBitmap(canvas);
 
             // Draw title
             if (mTitles != null) {
@@ -294,60 +299,62 @@ public class AdPlayer extends View implements View.OnClickListener {
         }
     }
 
-    private boolean mSwitching = false;
-    private boolean mForward = true;
-    private int mSwitchedWidth = 0;
-    private int mTotalSwitchingTime = 600;
-    private int mDelayTimeWhildSwitching = 20;
+    private void startSmoothSwitching() {
+        mPlayHandler.postDelayed(smootoSwitchingRunnable, mDelayTimeWhileSwitching);
+    }
 
-    private Runnable swtichingPictureRun = new Runnable() {
+    private Runnable smootoSwitchingRunnable = new Runnable() {
         @Override
         public void run() {
-            if (mSwitching) {
-                // Clear same kind callbacks at queue.
-                // Because onDraw maybe called several times.
-                mPlayHandler.removeCallbacks(this);
-
-                // Calculate alpha to ensure finish switch in given time
-                int width = getMeasuredWidth();
-                int alpha = width * mDelayTimeWhildSwitching / mTotalSwitchingTime;
-                if (mForward) {
-                    mSwitchedWidth -= alpha;
-                } else {
-                    mSwitchedWidth += alpha;
-                }
-                if (Math.abs(mSwitchedWidth) > width) {
-                    // Finish switching task
-                    mSwitchedWidth = width;
-                    mSwitching = false;
-                    // Post the next switch task
-                    postNextSwitchTask();
-                }
-                mPlayHandler.postDelayed(swtichingPictureRun, mDelayTimeWhildSwitching);
-                // Refresh view
-                invalidate();
+            // Calculate alpha to ensure finish switch in given time
+            int width = getMeasuredWidth();
+            int alpha = width * mDelayTimeWhileSwitching / mTotalSwitchingTime;
+            if (mForward) {
+                mSwitchedOffset -= alpha;
+            } else {
+                mSwitchedOffset += alpha;
             }
+            if (Math.abs(mSwitchedOffset) > width) {
+                // Finish switching task
+                // reset offset
+                mSwitchedOffset = 0;
+                // Post the next switch task
+                postNextSwitchTask();
+            } else {
+                // post next recycle
+                mPlayHandler.postDelayed(this, mDelayTimeWhileSwitching);
+            }
+
+            // Refresh view
+            invalidate();
         }
     };
 
+    /**
+     * Draw the pictures to bitmap
+     * @param canvas: from onDraw
+     */
     private void drawDisplayBitmap(Canvas canvas) {
-        if (mSwitching) {
+
+        if (mSwitchedOffset != 0) {
+            // In progress of smooth switching
             if (mForward) {
                 // switch to next picture
                 // draw left
-                canvas.drawBitmap(mAdPictures.get(mPreIndex), mSwitchedWidth, 0, null);
+                canvas.drawBitmap(mAdPictures.get(mPreIndex), mSwitchedOffset, 0, null);
                 //draw right
-                canvas.drawBitmap(getCurrentScaledPicture(), getMeasuredWidth() + mSwitchedWidth, 0, null);
+                canvas.drawBitmap(getCurrentScaledPicture(),
+                        getMeasuredWidth() + mSwitchedOffset, 0, null);
             } else {
                 // switch to previous picture
                 // draw left
-                canvas.drawBitmap(mAdPictures.get(mPreIndex), -getMeasuredWidth() + mSwitchedWidth, 0, null);
+                canvas.drawBitmap(mAdPictures.get(mPreIndex),
+                        -getMeasuredWidth() + mSwitchedOffset, 0, null);
                 //draw right
-                canvas.drawBitmap(getCurrentScaledPicture(), mSwitchedWidth, 0, null);
+                canvas.drawBitmap(getCurrentScaledPicture(), mSwitchedOffset, 0, null);
             }
-
-            mPlayHandler.postDelayed(swtichingPictureRun, mSwitchedWidth == 0 ? 0 : mDelayTimeWhildSwitching);
         } else {
+            // Draw current picture
             canvas.drawBitmap(getCurrentScaledPicture(), 0, 0, null);
         }
     }
