@@ -11,6 +11,8 @@ import android.os.Handler;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
 
 import java.util.ArrayList;
@@ -25,22 +27,38 @@ public class AdPlayer extends View implements View.OnClickListener {
 
     private final int DEFAULT_TITLE_BG_HEIGHT = 100;
 
+    private final int DEFAULT_SMOOTH_SWITCHING_HEIGHT = 300;
+
+    private final int DEFAULT_INDEX_ICON_RADIUS = 10;
+
+    private final int DEFAULT_INDEX_ICON_SPACE = 35;
+
+    private final int DEFAULT_INDEX_ICON_MARGIN = 50;
+
+    private final int DEFAULT_TITLE_TEXT_SIZE = 40;
+
+    private final int DEFAULT_TITLE_BG_COLOR = 0x80000000;
+
+    private final int DEFAULT_DELAY_TIME_WHILE_SWITCHING = 10;
+
+
+
     // Store the current index of shown picture
     private int mCurIndex;
 
-    private int mPreIndex = -1;
+    // previous index of current index
+    private int mPreIndex;
 
     // Array to store AD pictures
     private List<Bitmap> mAdPictures;
 
-    private int mIndexIconRadius = 10;
+    // radius of index icon
+    private int mIndexIconRadius = DEFAULT_INDEX_ICON_RADIUS;
 
     // The space between two center of index icon
-    private int mIndexIconSpace = 35;
+    private int mIndexIconSpace = DEFAULT_INDEX_ICON_SPACE;
 
-    private int mIndexIconMargin = 50;
-
-    private int mIndexIconPos;
+    private int mIndexIconMargin = DEFAULT_INDEX_ICON_MARGIN;
 
     private class Point {
         int x;
@@ -62,42 +80,49 @@ public class AdPlayer extends View implements View.OnClickListener {
 
     private int mTitleTextColor = Color.WHITE;
 
-    private int mTitleTextSize = 40;
+    private int mTitleTextSize = DEFAULT_TITLE_TEXT_SIZE;
 
-    private int mTitleBgColor = 0x80000000;
+    private int mTitleBgColor = DEFAULT_TITLE_BG_COLOR;
 
     private int mTitleBgHeight = DEFAULT_TITLE_BG_HEIGHT;
 
-    private boolean mForward = true;
-
-    // the offset switched
-    private int mSwitchedOffset = 0;
-
-    // Total time while smooth switching
-    private int mTotalSwitchingTime = 500;
-
-    // Refresh frequency while smooth switching
-    private int mDelayTimeWhileSwitching = 10;
+    // left value of left picture displayed
+    private int mLeftOfLeftPicture = 0;
 
     // The time switch to next picture (ms).
     private int mSwitchTime = DEFAULT_SWITCH_TIME;
 
-    private Handler mPlayHandler = new Handler();
+    // Total time while smooth switching
+    private int mTotalSwitchingTime = DEFAULT_SMOOTH_SWITCHING_HEIGHT;
 
-    private Runnable mPlayRunnable = new Runnable() {
-        @Override
-        public void run() {
-            // Refresh view while updating index success
-            if (updateIndex(true)) {
-                // Start to switch
-                // Initial
-                mSwitchedOffset = 0;
+    // Refresh frequency while smooth switching
+    private int mDelayTimeWhileSwitching = DEFAULT_DELAY_TIME_WHILE_SWITCHING;
 
-                // startSmoothSwitching
-                startSmoothSwitching();
-            }
-        }
-    };
+    // Track velocity after finger leave screen
+    private VelocityTracker mVelocityTracker;
+
+    // x coordinate of touch down
+    private float mStartX;
+
+    // displacement from mStartX
+    private int mDisplacement;
+
+    // Index of left displayed pictures, it is current index if just one picture.
+    private int mLeftIndex;
+
+    // Index of right displayed pictures, no use while just one picture.
+    private int mRightIndex;
+
+    // Rest length for switching
+    private int mRestWidthBeforeSiwtching = 0;
+
+    // To +/- per mDelayTimeWhileSwitching
+    private int mAlpha = 0;
+
+    // Check if left picture toward left
+    private boolean mTowardLeft = true;
+
+    private Handler mHandler = new Handler();
 
     public interface ItemClickListener {
         void onItemClick(int index);
@@ -159,13 +184,16 @@ public class AdPlayer extends View implements View.OnClickListener {
         boolean result = false;
 
         if (mAdPictures != null && mAdPictures.size() > 1) {
-            // Store previous index
-            mPreIndex = mCurIndex;
-            // Update current index
             if (forward) {
+                // Store previous index
+                mPreIndex = mCurIndex;
+                // Update current index
                 mCurIndex = ++mCurIndex % mAdPictures.size();
             } else {
-                mCurIndex = (--mCurIndex < 0) ? mAdPictures.size() - 1 : mCurIndex;
+                // Update current index
+                mCurIndex = mPreIndex;
+                // Store previous index
+                mPreIndex = (--mPreIndex < 0) ? mAdPictures.size() - 1 : mPreIndex;;
             }
             result = true;
         }
@@ -173,11 +201,27 @@ public class AdPlayer extends View implements View.OnClickListener {
         return result;
     }
 
+    private Runnable mPlayRunnable = new Runnable() {
+        @Override
+        public void run() {
+            // Refresh view while updating index success
+            updateIndex(true);
+            mLeftIndex = mPreIndex;
+
+            // Start to switch
+            // Initial
+            mLeftOfLeftPicture = 0;
+
+            // startSmoothSwitching
+            startSmoothSwitching();
+        }
+    };
+
     /**
      * Post next switch task
      */
     private void postNextSwitchTask() {
-        mPlayHandler.postDelayed(mPlayRunnable, mSwitchTime);
+        mHandler.postDelayed(mPlayRunnable, mSwitchTime);
     }
 
 
@@ -188,7 +232,8 @@ public class AdPlayer extends View implements View.OnClickListener {
     public void start() {
         if (mAdPictures != null && mAdPictures.size() > 0) {
             // Initial index to 0
-            mCurIndex = 0;
+            mLeftIndex = mCurIndex = 0;
+            mPreIndex = mAdPictures.size() - 1;
 
             // Refresh player to show first picture
             invalidate();
@@ -203,7 +248,7 @@ public class AdPlayer extends View implements View.OnClickListener {
      */
     public void stop() {
         // Remove switch task
-        mPlayHandler.removeCallbacks(mPlayRunnable);
+        mHandler.removeCallbacks(mPlayRunnable);
     }
 
     /**
@@ -229,8 +274,8 @@ public class AdPlayer extends View implements View.OnClickListener {
      * Return scaled picture to show
      * @return bitmap
      */
-    private Bitmap getCurrentScaledPicture() {
-        Bitmap oldBm = mAdPictures.get(mCurIndex);
+    private Bitmap getScaledPicture(int index) {
+        Bitmap oldBm = mAdPictures.get(index);
         int bmWidth = oldBm.getWidth();
         int bmHeight = oldBm.getHeight();
         float scaleWidth = ((float)getMeasuredWidth()) / bmWidth;
@@ -242,11 +287,11 @@ public class AdPlayer extends View implements View.OnClickListener {
             matrix.postScale(scaleWidth, scaleHeight);
             Bitmap newBm = Bitmap.createBitmap(oldBm,
                     0, 0, bmWidth, bmHeight, matrix, true);
-            mAdPictures.set(mCurIndex, newBm);
+            mAdPictures.set(index, newBm);
 
             oldBm.recycle();
         }
-        return mAdPictures.get(mCurIndex);
+        return mAdPictures.get(index);
     }
 
     @Override
@@ -300,29 +345,53 @@ public class AdPlayer extends View implements View.OnClickListener {
     }
 
     private void startSmoothSwitching() {
-        mPlayHandler.postDelayed(smootoSwitchingRunnable, mDelayTimeWhileSwitching);
+        // Initial before smooth switch
+        int totalWidth = getMeasuredWidth();
+        // Compute the rest length to switch
+        if (mTowardLeft) {
+            mRestWidthBeforeSiwtching = totalWidth - Math.abs(mLeftOfLeftPicture);
+        } else {
+            mRestWidthBeforeSiwtching = Math.abs(mLeftOfLeftPicture);
+        }
+        // Compute the total time for rest length to switch
+        mTotalSwitchingTime = DEFAULT_SMOOTH_SWITCHING_HEIGHT * mRestWidthBeforeSiwtching / totalWidth;
+
+        if (mTotalSwitchingTime >= mDelayTimeWhileSwitching) {
+            // Calculate alpha to ensure finish switch in given total time
+            mAlpha = mRestWidthBeforeSiwtching * mDelayTimeWhileSwitching / mTotalSwitchingTime;
+        } else {
+            // Smaller than refresh rate, not need to switch
+            mAlpha = 0;
+            mLeftOfLeftPicture = 0;
+        }
+
+        mHandler.postDelayed(smoothSwitchingRunnable, mDelayTimeWhileSwitching);
     }
 
-    private Runnable smootoSwitchingRunnable = new Runnable() {
+    private Runnable smoothSwitchingRunnable = new Runnable() {
         @Override
         public void run() {
-            // Calculate alpha to ensure finish switch in given time
-            int width = getMeasuredWidth();
-            int alpha = width * mDelayTimeWhileSwitching / mTotalSwitchingTime;
-            if (mForward) {
-                mSwitchedOffset -= alpha;
+            // change by direction
+            if (mTowardLeft) {
+                mLeftOfLeftPicture -= mAlpha;
             } else {
-                mSwitchedOffset += alpha;
+                mLeftOfLeftPicture += mAlpha;
             }
-            if (Math.abs(mSwitchedOffset) > width) {
+
+            if (-mLeftOfLeftPicture >= getMeasuredWidth() || mLeftOfLeftPicture >= 0) {
                 // Finish switching task
                 // reset offset
-                mSwitchedOffset = 0;
+                mLeftOfLeftPicture = 0;
+                mTowardLeft = true;
+
+                mLeftIndex = mCurIndex;
+
+
                 // Post the next switch task
                 postNextSwitchTask();
             } else {
                 // post next recycle
-                mPlayHandler.postDelayed(this, mDelayTimeWhileSwitching);
+                mHandler.postDelayed(this, mDelayTimeWhileSwitching);
             }
 
             // Refresh view
@@ -336,26 +405,17 @@ public class AdPlayer extends View implements View.OnClickListener {
      */
     private void drawDisplayBitmap(Canvas canvas) {
 
-        if (mSwitchedOffset != 0) {
+        if (mLeftOfLeftPicture != 0) {
             // In progress of smooth switching
-            if (mForward) {
-                // switch to next picture
-                // draw left
-                canvas.drawBitmap(mAdPictures.get(mPreIndex), mSwitchedOffset, 0, null);
-                //draw right
-                canvas.drawBitmap(getCurrentScaledPicture(),
-                        getMeasuredWidth() + mSwitchedOffset, 0, null);
-            } else {
-                // switch to previous picture
-                // draw left
-                canvas.drawBitmap(mAdPictures.get(mPreIndex),
-                        -getMeasuredWidth() + mSwitchedOffset, 0, null);
-                //draw right
-                canvas.drawBitmap(getCurrentScaledPicture(), mSwitchedOffset, 0, null);
-            }
+            // draw left
+            canvas.drawBitmap(getScaledPicture(mLeftIndex), mLeftOfLeftPicture, 0, null);
+            //draw right
+            mRightIndex = (mLeftIndex + 1) % mAdPictures.size();
+            canvas.drawBitmap(getScaledPicture(mRightIndex),
+                    getMeasuredWidth() + mLeftOfLeftPicture, 0, null);
         } else {
             // Draw current picture
-            canvas.drawBitmap(getCurrentScaledPicture(), 0, 0, null);
+            canvas.drawBitmap(getScaledPicture(mLeftIndex), 0, 0, null);
         }
     }
 
@@ -397,4 +457,76 @@ public class AdPlayer extends View implements View.OnClickListener {
 
         return result;
     }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                if (mLeftOfLeftPicture != 0) {
+                    // it is switching, don't handle the set of events
+                    return false;
+                }
+                // Cancel task of auto switch to next picture
+                stop();
+                // Initial velocity tracker and displacement
+                mVelocityTracker = VelocityTracker.obtain();
+                mDisplacement = 0;
+                // record start x coordinate
+                mStartX = event.getX();
+
+                break;
+
+            case MotionEvent.ACTION_MOVE:
+                // Add event to tracker for further computation
+                mVelocityTracker.addMovement(event);
+
+                // use displacement to check toward left or right to drag direction
+                mDisplacement = (int)(event.getX() - mStartX);
+                if (mDisplacement > 0) {
+                    // Toward right, need to change mLeftIndex to mPreIndex
+                    mLeftIndex = mPreIndex;
+                    // Update the left of left picture
+                    mLeftOfLeftPicture = mDisplacement - getMeasuredWidth();
+                } else {
+                    // Toward left, mLeftIndex is mCurIndex
+                    mLeftIndex = mCurIndex;
+                    // Left of left picture equals displacement
+                    mLeftOfLeftPicture = mDisplacement;
+                }
+
+                invalidate();
+
+                break;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                mVelocityTracker.addMovement(event);
+                mVelocityTracker.computeCurrentVelocity(1000);
+
+                // check if needs to switch
+                if (Math.abs(mDisplacement) > getMeasuredWidth() / 2
+                        || Math.abs(mVelocityTracker.getXVelocity()) > 200f) {
+                    // Switch to left or right, it is the direction of displacement
+                    mTowardLeft = mDisplacement < 0;
+                    // Update index to previous if toward right, or update to next
+                    updateIndex(mTowardLeft);
+
+                    startSmoothSwitching();
+                } else {
+                    if (Math.abs(mDisplacement) > 0) {
+                        // rollback so its direction is opposite to displacement
+                        mTowardLeft = !(mDisplacement < 0);
+                        startSmoothSwitching();
+                    }
+                }
+
+                // recycle
+                mVelocityTracker.recycle();
+                mVelocityTracker = null;
+                break;
+        }
+        return true;
+    }
+
 }
